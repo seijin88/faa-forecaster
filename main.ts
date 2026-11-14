@@ -6,8 +6,9 @@
 //     most), with a floor so a quiet market keeps a tight but honest spread
 //     and a 0.05 cap so a single historical jump cannot inflate the horizon
 //   - Drift is the recent mean change per minute, capped so one printed
-//     jump cannot drag the median across the whole horizon, decaying
-//     exponentially over the horizon
+//     jump cannot drag the median across the whole horizon (and tightened
+//     from 0.002 to 0.001 when <5% of the last 360 minutes changed),
+//     decaying exponentially over the horizon
 //   - Quantiles: last + drift(h) + sigma * z_tau * sqrt(h), clamped to [0,1]
 //
 // Runs offline, Node 22, standard library only.
@@ -28,6 +29,12 @@ const SIGMA_FLOOR = 0.0005;
 const MAX_SIGMA = 0.05;
 /** Cap on the assumed trend, in price units per minute. */
 const MAX_DRIFT_PER_MIN = 0.002;
+/** Reduced per-minute drift cap for quiet markets, in price units per minute. */
+const QUIET_DRIFT_PER_MIN = 0.001;
+/** Lookback window in minutes for checking if a market is quiet. */
+const QUIET_TICK_WINDOW = 360;
+/** Fraction of changed minutes below which a market is considered quiet. */
+const QUIET_TICK_THRESHOLD = 0.05;
 /** Minutes over which the trend decays across the horizon. */
 const DRIFT_TAU = 100;
 
@@ -94,10 +101,13 @@ function forecast(m: CaseMarket, horizon: number): number[][] {
     ),
   );
 
-  // Trend: mostly the last hour, backed up by the last four, hard-capped.
+  // Trend: mostly the last hour, backed up by the last four, hard-capped
+  // (with a tighter cap on quiet markets that changed in <5% of the last 360m).
+  const driftCap =
+    tickRate(p, QUIET_TICK_WINDOW) < QUIET_TICK_THRESHOLD ? QUIET_DRIFT_PER_MIN : MAX_DRIFT_PER_MIN;
   const drift = Math.max(
-    -MAX_DRIFT_PER_MIN,
-    Math.min(MAX_DRIFT_PER_MIN, 0.6 * meanTick(p, 60) + 0.4 * meanTick(p, 240)),
+    -driftCap,
+    Math.min(driftCap, 0.6 * meanTick(p, 60) + 0.4 * meanTick(p, 240)),
   );
 
   const rows: number[][] = [];
