@@ -4,6 +4,7 @@
 //   - Volatility is the root-mean-square of recent minute ticks, blended
 //     across a 1-hour, 6-hour and full-history window (recent ticks weigh
 //     most), with a floor so a quiet market keeps a tight but honest spread
+//     and a 0.05 cap so a single historical jump cannot inflate the horizon
 //   - Drift is the recent mean change per minute, capped so one printed
 //     jump cannot drag the median across the whole horizon, decaying
 //     exponentially over the horizon
@@ -23,6 +24,8 @@ const QUANTILES = [0.05, 0.25, 0.5, 0.75, 0.95];
 const Z = [-1.644854, -0.674490, 0, 0.674490, 1.644854];
 /** Per-minute volatility floor, in price units per square-root minute. */
 const SIGMA_FLOOR = 0.0005;
+/** Per-minute volatility cap, in price units per square-root minute. */
+const MAX_SIGMA = 0.05;
 /** Cap on the assumed trend, in price units per minute. */
 const MAX_DRIFT_PER_MIN = 0.002;
 /** Minutes over which the trend decays across the horizon. */
@@ -83,9 +86,12 @@ function forecast(m: CaseMarket, horizon: number): number[][] {
   // Clamped so a single silent hour on an old market cannot collapse the spread.
   const heat = Math.max(0.6, Math.min(1.5, (tickRate(p, 120) + 0.03) / (tickRate(p, p.length) + 0.03)));
   // Recent ticks weigh most; the full history keeps short samples honest.
-  const sigma = Math.max(
-    (0.5 * rmsTick(p, 60) + 0.3 * rmsTick(p, 360) + 0.2 * rmsTick(p, p.length)) * heat,
-    SIGMA_FLOOR,
+  const sigma = Math.min(
+    MAX_SIGMA,
+    Math.max(
+      (0.5 * rmsTick(p, 60) + 0.3 * rmsTick(p, 360) + 0.2 * rmsTick(p, p.length)) * heat,
+      SIGMA_FLOOR,
+    ),
   );
 
   // Trend: mostly the last hour, backed up by the last four, hard-capped.
